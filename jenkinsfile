@@ -1,4 +1,5 @@
 node {
+	try {
     notify ('Job started')
   stage('Git-Checkout') {
    git 'https://github.com/Vikas-tm/samplejavacode.git'
@@ -25,7 +26,12 @@ node {
    archiveArtifacts 'target/*.war'
   }
  notify ('Job Completed')
+}catch(err){
+  notify("Error ${err}")
+  currentBuild.result = 'FAILURE'
 }
+}
+
 
 def notify(status){
     emailext (
