@@ -1,12 +1,11 @@
 node {
-	try {
-    notify ('Job started')
+    try {
+        notify ('Job Started')
   stage('Git-Checkout') {
    git 'https://github.com/Vikas-tm/samplejavacode.git'
   }
-
-  
-  stage('Maven-Clean') {
+      
+   stage('Maven-Clean') {
    sh label: '', script: 'mvn clean'
   }
     
@@ -16,29 +15,94 @@ node {
   
    stage('Maven-Test') {
    sh label: '', script: 'mvn test'
-  }
+     }
+     
+     stage ('Sonarqube')
+    {
+        withSonarQubeEnv('vik-sonar')
+        {
+            sh 'mvn sonar:sonar'
+        }
+        }
+
+    /* stage("Quality Gate"){
+          timeout(time: 1, unit: 'HOURS') {
+              def qg = waitForQualityGate()
+              if (qg.status != 'OK') {
+                  error "Pipeline aborted due to quality gate failure: ${qg.status}"
+				  abortPipeline: true
+              }
+          }
+      } */
   
-   stage('Maven-Package') {
+  stage('Maven-Package') {
    sh label: '', script: 'mvn package'
   }
   
-   stage('Archive-Artifacts') {
+    stage('Archive-Artifacts') {
    archiveArtifacts 'target/*.war'
   }
- notify ('Job Completed')
-}catch(err){
+  
+   stage('Upload Archive to Artifactory ')
+	{
+	def server = Artifactory.server('vik-artifactory')
+	def uploadSpec = """{
+			"files": [
+					{
+						"pattern": "**/*.war",
+						"target": "M1036759/"
+					}
+					 ]
+						}"""
+							server.upload(uploadSpec)
+	}
+	
+	stage('Downloading artifact')
+	{
+		def server = Artifactory.server 'vik-artifactory'
+		def downloadSpec="""{
+			"files":[
+					{
+					"pattern":"M1036759/addressbook.war",
+					"target":"/var/lib/jenkins/workspace/addressbook-pipeline-as-code/"
+					}
+					]
+							}"""
+				server.download(downloadSpec)
+	}
+  
+     stage('Docker-Stage-Deployment') {
+    sh label: '', script: 'sudo docker-compose up -d --build'
+     }
+	 
+	 stage('Geting Ready For Ansible') {
+  sh label: 'Docker', script: 'cp -rf /var/lib/jenkins/workspace/addressbook-pipeline-as-code/addressbook.war Ansible/templates/'
+  sh label: 'Jenkins', script: "echo '<h1> TASK BUILD ID: ${env.BUILD_DISPLAY_NAME}</h1>' > Ansible/templates/index.html"
+      }
+	  
+	def project_terra="Terraform"
+	dir(project_terra) {
+   stage('Prod Deployment on AWS'){
+   sh label: 'terraform', script: '/bin/terraform  init'
+   sh label: 'terraform', script: '/bin/terraform  apply -input=false -auto-approve'
+   }
+}
+
+  
+   notify ('Job ended')
+}   
+  
+catch(err) {
   notify("Error ${err}")
   currentBuild.result = 'FAILURE'
 }
 }
 
-
 def notify(status){
     emailext (
-	to: "vikas.mahabaleshwara@mindtree.com",
+	to: "vikas.tm@gmail.com",
 	subject: "${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
 	 body: """<p>${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
 	<p>Check console output at <a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a></p>""",
 		)
 	}
-
